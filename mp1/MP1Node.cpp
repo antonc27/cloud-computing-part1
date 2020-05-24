@@ -123,12 +123,21 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
     static char s[1024];
 #endif
 
-    if ( 0 == memcmp((char *)&(memberNode->addr.addr), (char *)&(joinaddr->addr), sizeof(memberNode->addr.addr))) {
+    if (memberNode->addr == *joinaddr) {
         // I am the group booter (first process to join the group). Boot up the group
 #ifdef DEBUGLOG
         log->LOG(&memberNode->addr, "Starting up group...");
 #endif
         memberNode->inGroup = true;
+
+        int id;
+        short port;
+        memcpy(&id, &memberNode->addr.addr[0], sizeof(int));
+        memcpy(&port, &memberNode->addr.addr[4], sizeof(short));
+        MemberListEntry mle = MemberListEntry(id, port, memberNode->heartbeat, memberNode->heartbeat);
+        memberNode->memberList.push_back(mle);
+
+        log->logNodeAdd(joinaddr, joinaddr);
     }
     else {
         size_t msgsize = sizeof(MessageHdr) + sizeof(joinaddr->addr) + sizeof(long) + 1;
@@ -214,10 +223,73 @@ void MP1Node::checkMessages() {
  *
  * DESCRIPTION: Message handler for different message types
  */
-bool MP1Node::recvCallBack(void *env, char *data, int size ) {
-	/*
-	 * Your code goes here
-	 */
+bool MP1Node::recvCallBack(void *env, char *data, int size) {
+    assert(memberNode == (Member *)env);
+
+    MessageHdr *msg = (MessageHdr *)data;
+
+    if (msg->msgType == JOINREQ) {
+        long *hb = (long *) (data + sizeof(MessageHdr) + sizeof(Address) + 1);
+        Address *addr = (Address *) (data + sizeof(MessageHdr));
+
+        int id;
+        short port;
+        memcpy(&id, &addr->addr[0], sizeof(int));
+        memcpy(&port, &addr->addr[4], sizeof(short));
+        MemberListEntry mle = MemberListEntry(id, port, *hb, memberNode->heartbeat);
+        memberNode->memberList.push_back(mle);
+
+        log->logNodeAdd(&memberNode->addr, addr);
+
+        int size = memberNode->memberList.size();
+
+        size_t msgsize = sizeof(MessageHdr) + sizeof(int) + sizeof(MemberListEntry) * size;
+        msg = (MessageHdr *) malloc(msgsize * sizeof(char));
+
+        msg->msgType = JOINREP;
+        memcpy((char *)(msg+1), &size, sizeof(int));
+        int i;
+        MemberListEntry *ptr;
+        for (i = 0, ptr = (MemberListEntry *)((char *)(msg+1) + sizeof(int)); i < size; i++, ptr++) {
+            MemberListEntry mle = memberNode->memberList.at(i);
+            memcpy(ptr, &mle, sizeof(MemberListEntry));
+        }
+
+        emulNet->ENsend(&memberNode->addr, addr, (char *)msg, msgsize);
+
+        free(msg);
+    } else if (msg->msgType == JOINREP) {
+        memberNode->inGroup = true;
+
+        int myId;
+        memcpy(&myId, &memberNode->addr.addr[0], sizeof(int));
+
+        assert(memberNode->memberList.size() == 0);
+
+        int size;
+        memcpy(&size, (char *)(msg+1), sizeof(int));
+
+        int i;
+        MemberListEntry *ptr;
+        for (i = 0, ptr = (MemberListEntry *)((char *)(msg+1) + sizeof(int)); i < size; i++, ptr++) {
+            MemberListEntry mle;
+            memcpy(&mle, ptr, sizeof(MemberListEntry));
+
+            if (myId == mle.id) {
+                mle.heartbeat = memberNode->heartbeat;
+            }
+            mle.timestamp = memberNode->heartbeat;
+
+            memberNode->memberList.push_back(mle);
+
+            Address other;
+            memcpy(&other.addr[0], &mle.id, sizeof(int));
+            memcpy(&other.addr[4], &mle.port, sizeof(short));
+            log->logNodeAdd(&memberNode->addr, &other);
+        }
+    }
+
+    return true;
 }
 
 /**
