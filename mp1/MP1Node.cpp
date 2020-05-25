@@ -191,6 +191,8 @@ void MP1Node::nodeLoop() {
     	return;
     }
 
+    memberNode->heartbeat++;
+
     // Check my messages
     checkMessages();
 
@@ -236,8 +238,33 @@ void serializeMemberList(void *buffer, const vector<MemberListEntry> &memberList
     }
 }
 
-void deserializeMemberList(vector<MemberListEntry> &memberList, void *buffer) {
-    assert(memberList.size() == 0);
+void deserializeMemberList(vector<MemberListEntry> &memberList1, void *buffer) {
+    vector<MemberListEntry> memberList;
+
+        // for (MemberListEntry const &mle : memberList) {
+        //     Address other;
+        //     memcpy(&other.addr[0], &mle.id, sizeof(int));
+        //     memcpy(&other.addr[4], &mle.port, sizeof(short));
+        //     //printAddress(&other);
+
+        //     Address *addr = &other;
+
+        //     printf("%d.%d.%d.%d:%d \n",  addr->addr[0],addr->addr[1],addr->addr[2],
+        //                                                addr->addr[3], *(short*)&addr->addr[4]) ;
+        // }
+
+    //assert(memberList.size() == 0);
+    if (memberList.size() != 0) {
+        void* callstack[128];
+        int i, frames = backtrace(callstack, 128);
+        char** strs = backtrace_symbols(callstack, frames);
+        for (i = 0; i < frames; ++i) {
+            printf("%s\n", strs[i]);
+        }
+        free(strs);
+
+        assert(false);
+    }
 
     int size;
     memcpy(&size, buffer, sizeof(int));
@@ -250,6 +277,8 @@ void deserializeMemberList(vector<MemberListEntry> &memberList, void *buffer) {
 
         memberList.push_back(mle);
     }
+
+    memberList1 = memberList;
 }
 
 void MP1Node::sendJoinRepMessage(Member *senderMemberNode, Address *dest) {
@@ -304,9 +333,62 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
             memcpy(&other.addr[4], &mle.port, sizeof(short));
             log->logNodeAdd(&memberNode->addr, &other);
         }
+    } else if (msg->msgType == HEARTBEAT) {
+        //printf("HEARTBEAT\n");
+
+        vector<MemberListEntry> receivedMemberList;
+        //receivedMemberList.clear();
+        //assert(receivedMemberList.size() == 0);
+        // for (MemberListEntry const &mle : receivedMemberList) {
+        //     Address other;
+        //     memcpy(&other.addr[0], &mle.id, sizeof(int));
+        //     memcpy(&other.addr[4], &mle.port, sizeof(short));
+        //     printAddress(&other);
+        // }
+        deserializeMemberList(receivedMemberList, msg+1);
+        for (MemberListEntry const &receivedMle : receivedMemberList) {
+            bool found = false;
+            // MemberListEntry newMle;
+            for (MemberListEntry const &mle : memberNode->memberList) {
+                if (receivedMle.id == mle.id) {
+                    assert(receivedMle.port == mle.port);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                memberNode->memberList.push_back(receivedMle);
+
+                Address other;
+                memcpy(&other.addr[0], &receivedMle.id, sizeof(int));
+                memcpy(&other.addr[4], &receivedMle.port, sizeof(short));
+                log->logNodeAdd(&memberNode->addr, &other);
+            }
+        }
+
+        // for (MemberListEntry const &mle : receivedMemberList) {
+        //     Address other;
+        //     memcpy(&other.addr[0], &mle.id, sizeof(int));
+        //     memcpy(&other.addr[4], &mle.port, sizeof(short));
+        //     printAddress(&other);
+        // }
     }
 
     return true;
+}
+
+void MP1Node::sendHeartBeatMessage(Member *senderMemberNode, Address *dest) {
+    int size = senderMemberNode->memberList.size();
+
+    size_t msgsize = sizeof(MessageHdr) + sizeof(int) + sizeof(MemberListEntry) * size;
+    MessageHdr *msg = (MessageHdr *) malloc(msgsize * sizeof(char));
+
+    msg->msgType = HEARTBEAT;
+    serializeMemberList(msg+1, senderMemberNode->memberList);
+
+    emulNet->ENsend(&senderMemberNode->addr, dest, (char *)msg, msgsize);
+
+    free(msg);
 }
 
 /**
@@ -318,9 +400,23 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
  */
 void MP1Node::nodeLoopOps() {
 
-	/*
-	 * Your code goes here
-	 */
+    int myId = *(int*)(&memberNode->addr.addr[0]);
+    int size = memberNode->memberList.size();
+
+	MemberListEntry dest;
+    while (true) {
+        int idx = rand() % size;
+        MemberListEntry mle = memberNode->memberList.at(idx);
+        if (mle.id == myId)
+            continue;
+        dest = mle;
+        break;
+    }
+
+    Address other;
+    memcpy(&other.addr[0], &dest.id, sizeof(int));
+    memcpy(&other.addr[4], &dest.port, sizeof(short));
+    sendHeartBeatMessage(memberNode, &other);
 
     return;
 }

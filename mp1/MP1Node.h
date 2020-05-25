@@ -31,6 +31,7 @@
 enum MsgTypes {
     JOINREQ,
     JOINREP,
+    HEARTBEAT,
     DUMMYLASTMSGTYPE
 };
 
@@ -56,8 +57,12 @@ private:
 	Member *memberNode;
 	char NULLADDR[6];
 
+	// void serializeMemberList(void *buffer, const vector<MemberListEntry> &memberList);
+	// void deserializeMemberList(vector<MemberListEntry> &memberList, void *buffer);
+
 	void sendJoinReqMessage(Member *memberNode, Address *dest);
 	void sendJoinRepMessage(Member *memberNode, Address *dest);
+	void sendHeartBeatMessage(Member *memberNode, Address *dest);
 
 public:
 	MP1Node(Member *, Params *, EmulNet *, Log *, Address *);
