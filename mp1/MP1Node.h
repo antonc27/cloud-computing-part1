@@ -28,7 +28,7 @@
 /**
  * Message Types
  */
-enum MsgTypes{
+enum MsgTypes {
     JOINREQ,
     JOINREP,
     DUMMYLASTMSGTYPE
@@ -41,7 +41,7 @@ enum MsgTypes{
  */
 typedef struct MessageHdr {
 	enum MsgTypes msgType;
-}MessageHdr;
+} MessageHdr;
 
 /**
  * CLASS NAME: MP1Node
@@ -55,6 +55,9 @@ private:
 	Params *par;
 	Member *memberNode;
 	char NULLADDR[6];
+
+	void sendJoinReqMessage(Member *memberNode, Address *dest);
+	void sendJoinRepMessage(Member *memberNode, Address *dest);
 
 public:
 	MP1Node(Member *, Params *, EmulNet *, Log *, Address *);
