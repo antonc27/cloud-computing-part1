@@ -106,7 +106,7 @@ int MP1Node::initThisNode(Address *joinaddr) {
 	memberNode->nnb = 0;
 	memberNode->heartbeat = 0;
 	memberNode->pingCounter = TFAIL;
-	memberNode->timeOutCounter = -1;
+	memberNode->timeOutCounter = 10;
     initMemberListTable(memberNode);
 
     return 0;
@@ -268,15 +268,19 @@ void MP1Node::sendJoinRepMessage(Member *senderMemberNode, Address *dest) {
     free(msg);
 }
 
-bool contains(vector<MemberListEntry> const &memberList, MemberListEntry const &entry) {
+MemberListEntry *find(vector<MemberListEntry> const &memberList, int id, int port) {
     for (MemberListEntry const &mle : memberList) {
-        if (entry.id == mle.id) {
-            assert(entry.port == mle.port);
+        if (id == mle.id) {
+            assert(port == mle.port);
 
-            return true;
+            return (MemberListEntry *) &mle;
         }
     }
-    return false;
+    return nullptr;
+}
+
+MemberListEntry *find(vector<MemberListEntry> const &memberList, MemberListEntry const &entry) {
+    return find(memberList, entry.id, entry.port);
 }
 
 /**
@@ -286,6 +290,8 @@ bool contains(vector<MemberListEntry> const &memberList, MemberListEntry const &
  */
 bool MP1Node::recvCallBack(void *env, char *data, int size) {
     assert(memberNode == (Member *)env);
+
+    int myId = *(int*)(&memberNode->addr.addr[0]);
 
     MessageHdr *msg = (MessageHdr *)data;
 
@@ -301,8 +307,6 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
         sendJoinRepMessage(memberNode, addr);
     } else if (msg->msgType == JOINREP) {
         memberNode->inGroup = true;
-
-        int myId = *(int*)(&memberNode->addr.addr[0]);
 
         deserializeMemberList(memberNode->memberList, msg+1);
 
@@ -324,14 +328,24 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
 
         vector<MemberListEntry> receivedMemberList;
         deserializeMemberList(receivedMemberList, msg+1);
-        for (MemberListEntry const &receivedMle : receivedMemberList) {
-            if (!contains(memberNode->memberList, receivedMle)) {
+        for (MemberListEntry &receivedMle : receivedMemberList) {
+            MemberListEntry *found = find(memberNode->memberList, receivedMle);
+            if (found == nullptr) {
+                if (myId == receivedMle.id) {
+                    receivedMle.heartbeat = memberNode->heartbeat;
+                }
+                receivedMle.timestamp = memberNode->heartbeat;
                 memberNode->memberList.push_back(receivedMle);
 
                 Address other;
                 memcpy(&other.addr[0], &receivedMle.id, sizeof(int));
                 memcpy(&other.addr[4], &receivedMle.port, sizeof(short));
                 log->logNodeAdd(&memberNode->addr, &other);
+            } else {
+                if (receivedMle.heartbeat > found->heartbeat) {
+                    found->heartbeat = receivedMle.heartbeat;
+                    found->timestamp = memberNode->heartbeat;
+                }
             }
         }
     }
@@ -355,6 +369,12 @@ void MP1Node::sendHeartBeatMessage(Member *senderMemberNode, Address *dest) {
 
 int MP1Node::chooseAndSendHeartBeat(int skipId) {
     int myId = *(int*)(&memberNode->addr.addr[0]);
+    int myPort = *(short*)(&memberNode->addr.addr[4]);
+    MemberListEntry *me = find(memberNode->memberList, myId, myPort);
+    assert(me != nullptr);
+    me->heartbeat = memberNode->heartbeat;
+    me->timestamp = memberNode->heartbeat;
+
     int size = memberNode->memberList.size();
 
     MemberListEntry dest;
@@ -383,6 +403,21 @@ int MP1Node::chooseAndSendHeartBeat(int skipId) {
  * 				Propagate your membership list
  */
 void MP1Node::nodeLoopOps() {
+
+    auto it = memberNode->memberList.begin();
+    while (it != memberNode->memberList.end()) {
+        if (memberNode->heartbeat - it->timestamp >= 2 * memberNode->timeOutCounter) {
+
+            Address other;
+            memcpy(&other.addr[0], &it->id, sizeof(int));
+            memcpy(&other.addr[4], &it->port, sizeof(short));
+            log->logNodeRemove(&memberNode->addr, &other);
+
+            it = memberNode->memberList.erase(it);
+        } else {
+            it++;
+        }
+    }
 
     int sentId = chooseAndSendHeartBeat(-1);
     chooseAndSendHeartBeat(sentId);
