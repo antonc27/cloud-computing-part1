@@ -238,33 +238,8 @@ void serializeMemberList(void *buffer, const vector<MemberListEntry> &memberList
     }
 }
 
-void deserializeMemberList(vector<MemberListEntry> &memberList1, void *buffer) {
-    vector<MemberListEntry> memberList;
-
-        // for (MemberListEntry const &mle : memberList) {
-        //     Address other;
-        //     memcpy(&other.addr[0], &mle.id, sizeof(int));
-        //     memcpy(&other.addr[4], &mle.port, sizeof(short));
-        //     //printAddress(&other);
-
-        //     Address *addr = &other;
-
-        //     printf("%d.%d.%d.%d:%d \n",  addr->addr[0],addr->addr[1],addr->addr[2],
-        //                                                addr->addr[3], *(short*)&addr->addr[4]) ;
-        // }
-
-    //assert(memberList.size() == 0);
-    if (memberList.size() != 0) {
-        void* callstack[128];
-        int i, frames = backtrace(callstack, 128);
-        char** strs = backtrace_symbols(callstack, frames);
-        for (i = 0; i < frames; ++i) {
-            printf("%s\n", strs[i]);
-        }
-        free(strs);
-
-        assert(false);
-    }
+void deserializeMemberList(vector<MemberListEntry> &memberList, void *buffer) {
+    assert(memberList.size() == 0);
 
     int size;
     memcpy(&size, buffer, sizeof(int));
@@ -277,8 +252,6 @@ void deserializeMemberList(vector<MemberListEntry> &memberList1, void *buffer) {
 
         memberList.push_back(mle);
     }
-
-    memberList1 = memberList;
 }
 
 void MP1Node::sendJoinRepMessage(Member *senderMemberNode, Address *dest) {
@@ -293,6 +266,17 @@ void MP1Node::sendJoinRepMessage(Member *senderMemberNode, Address *dest) {
     emulNet->ENsend(&senderMemberNode->addr, dest, (char *)msg, msgsize);
 
     free(msg);
+}
+
+bool contains(vector<MemberListEntry> const &memberList, MemberListEntry const &entry) {
+    for (MemberListEntry const &mle : memberList) {
+        if (entry.id == mle.id) {
+            assert(entry.port == mle.port);
+
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
@@ -334,29 +318,14 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
             log->logNodeAdd(&memberNode->addr, &other);
         }
     } else if (msg->msgType == HEARTBEAT) {
-        //printf("HEARTBEAT\n");
+        if (!memberNode->inGroup) {
+            return false;
+        }
 
         vector<MemberListEntry> receivedMemberList;
-        //receivedMemberList.clear();
-        //assert(receivedMemberList.size() == 0);
-        // for (MemberListEntry const &mle : receivedMemberList) {
-        //     Address other;
-        //     memcpy(&other.addr[0], &mle.id, sizeof(int));
-        //     memcpy(&other.addr[4], &mle.port, sizeof(short));
-        //     printAddress(&other);
-        // }
         deserializeMemberList(receivedMemberList, msg+1);
         for (MemberListEntry const &receivedMle : receivedMemberList) {
-            bool found = false;
-            // MemberListEntry newMle;
-            for (MemberListEntry const &mle : memberNode->memberList) {
-                if (receivedMle.id == mle.id) {
-                    assert(receivedMle.port == mle.port);
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
+            if (!contains(memberNode->memberList, receivedMle)) {
                 memberNode->memberList.push_back(receivedMle);
 
                 Address other;
@@ -365,13 +334,6 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
                 log->logNodeAdd(&memberNode->addr, &other);
             }
         }
-
-        // for (MemberListEntry const &mle : receivedMemberList) {
-        //     Address other;
-        //     memcpy(&other.addr[0], &mle.id, sizeof(int));
-        //     memcpy(&other.addr[4], &mle.port, sizeof(short));
-        //     printAddress(&other);
-        // }
     }
 
     return true;
@@ -391,23 +353,15 @@ void MP1Node::sendHeartBeatMessage(Member *senderMemberNode, Address *dest) {
     free(msg);
 }
 
-/**
- * FUNCTION NAME: nodeLoopOps
- *
- * DESCRIPTION: Check if any node hasn't responded within a timeout period and then delete
- * 				the nodes
- * 				Propagate your membership list
- */
-void MP1Node::nodeLoopOps() {
-
+int MP1Node::chooseAndSendHeartBeat(int skipId) {
     int myId = *(int*)(&memberNode->addr.addr[0]);
     int size = memberNode->memberList.size();
 
-	MemberListEntry dest;
+    MemberListEntry dest;
     while (true) {
         int idx = rand() % size;
         MemberListEntry mle = memberNode->memberList.at(idx);
-        if (mle.id == myId)
+        if (mle.id == myId || (size > 2 && mle.id == skipId))
             continue;
         dest = mle;
         break;
@@ -417,6 +371,21 @@ void MP1Node::nodeLoopOps() {
     memcpy(&other.addr[0], &dest.id, sizeof(int));
     memcpy(&other.addr[4], &dest.port, sizeof(short));
     sendHeartBeatMessage(memberNode, &other);
+
+    return dest.id;
+}
+
+/**
+ * FUNCTION NAME: nodeLoopOps
+ *
+ * DESCRIPTION: Check if any node hasn't responded within a timeout period and then delete
+ * 				the nodes
+ * 				Propagate your membership list
+ */
+void MP1Node::nodeLoopOps() {
+
+    int sentId = chooseAndSendHeartBeat(-1);
+    chooseAndSendHeartBeat(sentId);
 
     return;
 }

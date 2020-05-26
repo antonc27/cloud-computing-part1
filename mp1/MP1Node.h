@@ -57,8 +57,7 @@ private:
 	Member *memberNode;
 	char NULLADDR[6];
 
-	// void serializeMemberList(void *buffer, const vector<MemberListEntry> &memberList);
-	// void deserializeMemberList(vector<MemberListEntry> &memberList, void *buffer);
+	int chooseAndSendHeartBeat(int skipId);
 
 	void sendJoinReqMessage(Member *memberNode, Address *dest);
 	void sendJoinRepMessage(Member *memberNode, Address *dest);
