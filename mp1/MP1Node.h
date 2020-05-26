@@ -61,7 +61,7 @@ private:
 
 	void sendJoinReqMessage(Member *memberNode, Address *dest);
 	void sendJoinRepMessage(Member *memberNode, Address *dest);
-	void sendHeartBeatMessage(Member *memberNode, Address *dest);
+	void sendHeartBeatMessage(vector<MemberListEntry> const &memberList, Address *src, Address *dest);
 
 public:
 	MP1Node(Member *, Params *, EmulNet *, Log *, Address *);

@@ -353,16 +353,16 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
     return true;
 }
 
-void MP1Node::sendHeartBeatMessage(Member *senderMemberNode, Address *dest) {
-    int size = senderMemberNode->memberList.size();
+void MP1Node::sendHeartBeatMessage(vector<MemberListEntry> const &memberList, Address *src, Address *dest) {
+    int size = memberList.size();
 
     size_t msgsize = sizeof(MessageHdr) + sizeof(int) + sizeof(MemberListEntry) * size;
     MessageHdr *msg = (MessageHdr *) malloc(msgsize * sizeof(char));
 
     msg->msgType = HEARTBEAT;
-    serializeMemberList(msg+1, senderMemberNode->memberList);
+    serializeMemberList(msg+1, memberList);
 
-    emulNet->ENsend(&senderMemberNode->addr, dest, (char *)msg, msgsize);
+    emulNet->ENsend(src, dest, (char *)msg, msgsize);
 
     free(msg);
 }
@@ -387,10 +387,17 @@ int MP1Node::chooseAndSendHeartBeat(int skipId) {
         break;
     }
 
+    vector<MemberListEntry> listToSend;
+    for (MemberListEntry const &mle : memberNode->memberList) {
+        if (memberNode->heartbeat - mle.timestamp <= memberNode->timeOutCounter) {
+            listToSend.push_back(mle);
+        }
+    }
+
     Address other;
     memcpy(&other.addr[0], &dest.id, sizeof(int));
     memcpy(&other.addr[4], &dest.port, sizeof(short));
-    sendHeartBeatMessage(memberNode, &other);
+    sendHeartBeatMessage(listToSend, &memberNode->addr, &other);
 
     return dest.id;
 }
@@ -406,8 +413,7 @@ void MP1Node::nodeLoopOps() {
 
     auto it = memberNode->memberList.begin();
     while (it != memberNode->memberList.end()) {
-        if (memberNode->heartbeat - it->timestamp >= 2 * memberNode->timeOutCounter) {
-
+        if (memberNode->heartbeat - it->timestamp > 2 * memberNode->timeOutCounter) {
             Address other;
             memcpy(&other.addr[0], &it->id, sizeof(int));
             memcpy(&other.addr[4], &it->port, sizeof(short));
